@@ -15,7 +15,7 @@ class EncoderLayer(nn.Module):
         # step 1: self-attention
         attn_output = self.self_attn(x, x, x, mask)
         # step 2: residual connection and layer normalization
-        x - self.norm1(x + self.dropout(attn_output))
+        x = self.norm1(x + self.dropout(attn_output))
         # step 3: position-wise feedforward network
         ff_output = self.feed_forward(x)
         # step 4: residual connection and layer normalization
