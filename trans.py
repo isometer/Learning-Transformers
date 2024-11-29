@@ -37,6 +37,10 @@ train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=T
 test_dataset = TensorDataset(X_test, Y_test)
 test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False)
 
+Y_train -= 1  # Our labels are 1-indexed, adjust for 0-indexing downstream
+Y_test -= 1
+
+
 # %%
 
 def my_plot(epochs, loss):
@@ -45,10 +49,11 @@ def my_plot(epochs, loss):
 # define criterion for training
 criterion = nn.CrossEntropyLoss()
 
-transformer = Transformer(config.input_c, config.output_c, config.d_model, config.k, config.num_layers, config.d_ff, config.win_size, config.dropout)
+transformer = Transformer(config.input_c, config.output_c, config.d_model, config.k, 
+                          config.num_layers, config.d_ff, config.win_size, config.dropout)
 optimizer = optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
 
-transformer.train()
+transformer.train() # puts the model in 'training mode', allowing dropout etc.
 
 loss_vals = []
 for epoch in range(config.num_epochs):
@@ -56,17 +61,33 @@ for epoch in range(config.num_epochs):
     for batch_idx, (inputs, targets) in enumerate(train_loader):
         optimizer.zero_grad()
 
+        # print(f"Input shape: {inputs.shape}")
+
         # Forward pass
-        output = transformer(inputs, targets)
+        output = transformer(inputs)
+
+        if output.shape[1] != config.output_c:
+            raise ValueError(f"Expected output shape {(config.batch_size, config.output_c)} but got {output.shape}")
 
         # Calculate loss
-        loss = criterion(output.contiguous().view(-1, config.output_c), targets.contiguous().view(-1))
+        loss = criterion(output, targets)
 
         # Backward pass
         loss.backward()
         optimizer.step()
 
         epoch_loss += loss.item()
-    print(f"Epoch: {epoch + 1}, Loss: {loss.item()}")
+    print(f"Epoch: {epoch + 1}, Loss: {epoch_loss / len(train_loader)}")
 # %%
+transformer.eval()
+with torch.no_grad():
+    correct = 0
+    total = 0
+    for inputs, targets in test_loader:
+        outputs = transformer(inputs)
+        _, predicted = torch.max(outputs, 1)
+        total += targets.size(0)
+        correct += (predicted == targets).sum().item()
 
+    accuracy = 100 * correct / total
+    print(f"Test Accuracy: {accuracy:.2f}%")
