@@ -19,7 +19,9 @@ def create_sliding_windows_tensor(data, win_size=100, step=1):
         indices.append(range(i, i + win_size))  # Save the indices of this window
     return torch.cat(X, dim=0), indices
 
-X_data, indices = create_sliding_windows_tensor(X_data, win_size=config.win_size)
+X_data, indices = create_sliding_windows_tensor(X_data, win_size=config.win_size, step=25)
+
+print(f"data size: {X_data.shape}")
 
 # Create DataLoader for training data
 dataset = TensorDataset(X_data)
@@ -45,6 +47,9 @@ optimizer = optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), e
 
 transformer.train() # puts the model in 'training mode', allowing dropout etc.
 
+# the suspected problem: sliding windows at intervals of only one reading
+# creates a shit ton of sliding windows. Try spreading these out more.
+
 loss_vals = []
 for epoch in range(config.num_epochs):
     epoch_loss = 0
@@ -61,7 +66,8 @@ for epoch in range(config.num_epochs):
         # Calculate loss
         loss = criterion(output, targets)
 
-        print(f"loss: {loss}")
+        if(batch_idx % 100 == 0):
+            print(f"batch index {batch_idx}, loss: {loss}")
 
         # Backward pass
         loss.backward()
