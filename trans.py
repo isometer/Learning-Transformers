@@ -3,43 +3,27 @@
 from shared_imports import *
 from transformer import Transformer
 from transformer_config import config
+from wfdb_reader import *
 
 
 # %%
 
-X_train = np.loadtxt(r"./data/UCI HAR Dataset/train/X_train.txt")
-Y_train = np.loadtxt(r"./data/UCI HAR Dataset/train/y_train.txt")
+X_data = WfdbReader().fetch_data()
+X_data = torch.tensor(X_data, dtype=torch.float32) # dimensions: (examples, samples, features)
 
-X_test = np.loadtxt(r"./data/UCI HAR Dataset/test/X_test.txt")
-Y_test = np.loadtxt(r"./data/UCI HAR Dataset/test/y_test.txt")
+def create_sliding_windows_tensor(data, win_size=100, step=1):
+    X = []
+    indices = []
+    for i in range(0, data.shape[1] - win_size + 1, step):
+        X.append(data[:, i:i + win_size, :])  # Create sliding window
+        indices.append(range(i, i + win_size))  # Save the indices of this window
+    return torch.cat(X, dim=0), indices
 
-X_train = torch.tensor(X_train, dtype=torch.float32)
-Y_train = torch.tensor(Y_train, dtype=torch.long)
-
-X_test = torch.tensor(X_test, dtype=torch.float32)
-Y_test = torch.tensor(Y_test, dtype=torch.long)
-
-def create_sliding_windows_tensor(data, labels, win_size=100):
-    X, Y = [], []
-    for i in range(len(data) - win_size + 1):
-        X.append(data[i:i + win_size])
-        Y.append(labels[i + win_size - 1])  # Align labels with end of window
-    return torch.stack(X), torch.tensor(Y)
-
-X_train, Y_train = create_sliding_windows_tensor(X_train, Y_train, win_size=config.win_size)
-X_test, Y_test = create_sliding_windows_tensor(X_test, Y_test, win_size=config.win_size)
+X_data, indices = create_sliding_windows_tensor(X_data, win_size=config.win_size)
 
 # Create DataLoader for training data
-train_dataset = TensorDataset(X_train, Y_train)
-train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
-
-# Create DataLoader for test data (for evaluation purposes)
-test_dataset = TensorDataset(X_test, Y_test)
-test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False)
-
-Y_train -= 1  # Our labels are 1-indexed, adjust for 0-indexing downstream
-Y_test -= 1
-
+dataset = TensorDataset(X_data)
+loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
 
 # %%
 
@@ -47,10 +31,16 @@ def my_plot(epochs, loss):
     plt.plot(epochs, loss)
 
 # define criterion for training
-criterion = nn.CrossEntropyLoss()
+criterion = nn.MSELoss()
+
+using_cuda = torch.cuda.is_available()
 
 transformer = Transformer(config.input_c, config.output_c, config.d_model, config.k, 
                           config.num_layers, config.d_ff, config.win_size, config.dropout)
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+transformer.to(device)
+
 optimizer = optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
 
 transformer.train() # puts the model in 'training mode', allowing dropout etc.
@@ -58,38 +48,55 @@ transformer.train() # puts the model in 'training mode', allowing dropout etc.
 loss_vals = []
 for epoch in range(config.num_epochs):
     epoch_loss = 0
-    for batch_idx, (inputs, targets) in enumerate(train_loader):
+    for batch_idx, inputs in enumerate(loader):
+        inputs = torch.stack(inputs).squeeze(0) # removes first dimension of size 1        
         optimizer.zero_grad()
 
-        # print(f"Input shape: {inputs.shape}")
+        targets = inputs # critical: we are doing RECONSTRUCTION
 
-        # Forward pass
+        inputs, targets = inputs.to(device), targets.to(device)
+
         output = transformer(inputs)
-
-        if output.shape[1] != config.output_c:
-            raise ValueError(f"Expected output shape {(config.batch_size, config.output_c)} but got {output.shape}")
 
         # Calculate loss
         loss = criterion(output, targets)
+
+        print(f"loss: {loss}")
 
         # Backward pass
         loss.backward()
         optimizer.step()
 
         epoch_loss += loss.item()
-    print(f"Epoch: {epoch + 1}, Loss: {epoch_loss / len(train_loader)}")
+    print(f"Epoch: {epoch + 1}, Loss: {epoch_loss / len(loader)}")
 # %%
 transformer.eval()
 with torch.no_grad():
-    correct = 0
-    total = 0
-    for inputs, targets in test_loader:
-        outputs = transformer(inputs)
-        _, predicted = torch.max(outputs, 1)
-        total += targets.size(0)
-        correct += (predicted == targets).sum().item()
+    # EVALUATE SOMEHOW
+    print("evaluation is a later problem...")
+    # Initialize a zero array for the original data
+    original_length = X_data.shape[1]
+    anomaly_scores = np.zeros((original_length,))
 
-    accuracy = 100 * correct / total
-    print(f"Test Accuracy: {accuracy:.2f}%")
+    predictions = [] # fill in later, do a testing split
+    threshold = 1 # fix later when I know what these look like
+
+    # Aggregate predictions back to the original data
+    for i, idx_range in enumerate(indices):
+        for idx in idx_range:
+            anomaly_scores[idx] += predictions[i]  # Accumulate predictions
+
+    # Optionally normalize or threshold
+    anomaly_scores /= len(indices)
+    anomaly_labels = (anomaly_scores > threshold).astype(int)
+
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(original_data, label="Original Data")
+    plt.plot(anomaly_scores, label="Anomaly Scores", color="red")
+    plt.legend()
+    plt.show()
+    
 
 # %%

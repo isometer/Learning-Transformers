@@ -4,7 +4,7 @@ class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_seq_length):
         super(PositionalEncoding, self).__init__()
 
-        pe = torch.zeros(max_seq_length, d_model) # positional encoding vector
+        pe = torch.zeros(max_seq_length, d_model) # positional encoding vector: should match dims of input.
         position = torch.arange(0, max_seq_length, dtype=torch.float).unsqueeze(1) # indices starting at one
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model))
         
@@ -15,7 +15,7 @@ class PositionalEncoding(nn.Module):
 
     def forward(self, x):
         # Add the positional encodings to the input tensor
-        
+
         x = x + self.pe[:, :x.size(1)]
         return x
 
